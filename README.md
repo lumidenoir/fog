@@ -35,9 +35,3 @@ A Flutter app that displays weather data for your college using:
 flutter pub get
 flutter run
 ```
-
-## 🔧 Customization
-
-* Update API endpoints in your service files
-* JSON parsers are in `lib/models/`
-

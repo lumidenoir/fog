@@ -3,20 +3,6 @@ import 'package:fog_app/services/weather_api.dart';
 
 void main() async {
   try {
-    // var data1 = await fetchCurrentData();
-    // print("pagescrape: $data1");
-    // var data2 = await fetchAQI();
-    // print("pagescrape: $data2");
-    // await fetchForecastData();
-    // await fetchPastData();
-    // final forecastData = await fetchHourlyForecastData();
-    // print("Hourly Forecast Data:");
-    // for (var hour in forecastData['hourly']) {
-    //   print(
-    //       "${hour['time']} - Temp: ${hour['temperature']}°C, Precipitation: ${hour['precipitation']} mm");
-    // }
-    // await createOpmJson();
-    // await createFogJson();
     await createHourlyJson();
     await createDailyJson();
   } catch (e) {
@@ -34,11 +20,6 @@ Future<void> createDailyJson() async {
   } catch (e) {
     print("Error creating daily.json: $e");
   }
-}
-
-//For debug purpose
-Future<void> createFogJson() async {
-  await writeToFile('fog.json', await fetchHourlyPastData());
 }
 
 Future<void> createHourlyJson() async {
@@ -70,11 +51,3 @@ Future<void> createHourlyJson() async {
   }
 }
 
-// For debug purpose
-Future<void> createOpmJson() async {
-  await writeToFile('opm.json', await fetchHourlyForecastData());
-}
-
-Future<void> refresh() async {
-  //TODO
-}

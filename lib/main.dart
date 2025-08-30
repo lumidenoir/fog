@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:fog_app/screens/home_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'services/write_files.dart';
+import 'screens/weather_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,8 +14,40 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Weather App',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      title: 'FOG',
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black,
+        cardColor: const Color(0xFF1A1A1A),
+        primaryColor: Colors.white,
+        textTheme: TextTheme(
+          headlineLarge: GoogleFonts.bebasNeue(
+            fontWeight: FontWeight.w900,
+            fontSize: 64,
+            color: Colors.white,
+          ),
+          bodyLarge: GoogleFonts.bebasNeue(
+            fontWeight: FontWeight.w600,
+            fontSize: 16,
+            color: Colors.white70,
+          ),
+          bodyMedium: GoogleFonts.bebasNeue(
+            fontWeight: FontWeight.w500,
+            fontSize: 14,
+            color: Colors.white60,
+          ),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white70),
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          titleTextStyle: GoogleFonts.bebasNeue(
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+            color: Colors.white,
+          ),
+        ),
+      ),
       home: const SplashScreen(),
     );
   }
@@ -25,7 +58,6 @@ class SplashScreen extends StatelessWidget {
 
   Future<void> _initializeApp() async {
     try {
-      // Initialize the necessary data
       await createHourlyJson();
       await createDailyJson();
       print("JSON files initialized successfully.");
@@ -39,12 +71,10 @@ class SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<void>(
       future: _initializeApp(),
-      builder: (context, snapshot) {
+      builder: (BuildContext context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         } else if (snapshot.hasError) {
           return Scaffold(
@@ -52,19 +82,18 @@ class SplashScreen extends StatelessWidget {
               child: Text(
                 'Initialization Failed: ${snapshot.error}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16, color: Colors.red),
+                style: GoogleFonts.bebasNeue(fontSize: 16, color: Colors.red),
               ),
             ),
           );
         } else {
-          // Once initialization is successful, navigate to HomeScreen
           Future.microtask(() {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
+              MaterialPageRoute(builder: (context) => const WeatherScreen()),
             );
           });
-          return const SizedBox.shrink(); // Return empty container while navigating
+          return const SizedBox.shrink();
         }
       },
     );

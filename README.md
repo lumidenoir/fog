@@ -35,8 +35,6 @@ flutter pub get
 flutter run
 ```
 
-## Video
-<video width="500" controls>
-  <source src="https://raw.githubusercontent.com/lumidenoir/fog/main/fog.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+## Demo
+![Demo](demo.gif)
+[▶️ Watch Demo](https://raw.githubusercontent.com/lumidenoir/fog/main/fog.mp4)

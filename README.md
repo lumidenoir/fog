@@ -37,4 +37,3 @@ flutter run
 
 ## Demo
 ![Demo](demo.gif)
-[▶️ Watch Demo](https://raw.githubusercontent.com/lumidenoir/fog/main/fog.mp4)

@@ -1,19 +1,19 @@
 
 # 📡 College Weather App
 
-A Flutter app that displays weather data for your college using:
+A Flutter app that displays weather data for IITK using a local weather station:
 
-* **Past & Present Data** from the college's weather station
+* **Past & Present Data** from the campus weather station [fog-iitk](https://fog.iitk.ac.in/fog-prediction/sensordata.php)
 * **Forecast Data** from [Open-Meteo](https://open-meteo.com/)
 
 ## 📦 Features
 
-* **Current Weather:** Real-time data from the campus weather balloon
+* **Current Weather:** Real-time data from the campus weather balloon (replaced some deprecated sensor data with open-meteo)
 * **Hourly Data:** Combined timeline from station (past) & Open-Meteo (forecast)
 * **Daily Summary:**
 
-  * Past 3 days (from station)
-  * Next 3 days (from Open-Meteo)
+  * Past 2 days (from station)
+  * Next 7 days (from Open-Meteo)
 
 ## 🛠 Tech Stack
 
@@ -25,7 +25,6 @@ A Flutter app that displays weather data for your college using:
 
 ## 📁 Data Format
 
-* `present.json`: current weather data (temp, humidity, wind, etc.)
 * `hourly.json`: hourly temperature & precipitation
 * `daily.json`: min/max temps for past and upcoming days
 
@@ -35,3 +34,9 @@ A Flutter app that displays weather data for your college using:
 flutter pub get
 flutter run
 ```
+
+## Video
+<video width="500" controls>
+  <source src="https://raw.githubusercontent.com/lumidenoir/fog/main/fog.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>

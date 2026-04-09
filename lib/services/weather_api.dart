@@ -2,6 +2,7 @@ import 'dart:convert'; // For JSON decoding
 
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const String iitkUrl =
     "https://fog.iitk.ac.in/fog-prediction/apis/sensordata3.php";
@@ -12,6 +13,73 @@ const String aqiUrl = "https://air-quality-api.open-meteo.com/v1/air-quality"
     "?latitude=$latitude&longitude=$longitude&current=us_aqi,dust,uv_index,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide";
 const String openMeteoUrl =
     "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude";
+
+const String cacheKey = "weather_cache";
+
+Future<List<Map<String, dynamic>>> fetchFullDailyData() async {
+  var results = await Future.wait([fetchPastData(), fetchForecastData()]);
+  return [
+    ...results[0],
+    ...results[1],
+  ];
+}
+
+Future<List<Map<String, dynamic>>> fetchFullHourlyData() async {
+  var results = await Future.wait([fetchHourlyPastData(), fetchHourlyForecastData()]);
+  List<Map<String, dynamic>> pastHourlyData = results[0];
+  List<Map<String, dynamic>> forecastHourlyData = results[1];
+
+  DateTime lastPastTimestamp = DateTime(1970, 1, 1);
+  if (pastHourlyData.isNotEmpty) {
+    lastPastTimestamp = DateTime.parse(pastHourlyData.last['time']);
+  }
+
+  List<Map<String, dynamic>> filteredForecastData = forecastHourlyData.where((forecast) {
+    DateTime forecastTimestamp = DateTime.parse(forecast['time']);
+    return forecastTimestamp.isAfter(lastPastTimestamp);
+  }).toList();
+
+  return [
+    ...pastHourlyData,
+    ...filteredForecastData,
+  ];
+}
+
+Future<Map<String, dynamic>?> getCachedWeatherData() async {
+  final prefs = await SharedPreferences.getInstance();
+  final String? cachedString = prefs.getString(cacheKey);
+  if (cachedString != null) {
+    return jsonDecode(cachedString);
+  }
+  return null;
+}
+
+Future<void> cacheWeatherData(Map<String, dynamic> data) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(cacheKey, jsonEncode(data));
+}
+
+Future<Map<String, dynamic>> fetchAllWeatherData() async {
+  final results = await Future.wait([
+    fetchCurrentData(),
+    fetchFullHourlyData(),
+    fetchFullDailyData(),
+    fetchSunPosition(),
+    fetchAQI(),
+  ]);
+
+  final data = {
+    'currentData': results[0],
+    'hourlyData': results[1],
+    'dailyData': results[2],
+    'sunData': results[3],
+    'aqiData': results[4],
+    'timestamp': DateTime.now().toIso8601String(),
+  };
+
+  await cacheWeatherData(data);
+  return data;
+}
 
 Future<Map<String, dynamic>> fetchAQI() async {
   final response = await http.get(Uri.parse(aqiUrl));
@@ -118,48 +186,61 @@ Future<Map<String, dynamic>> fetchCurrentData() async {
   String url1 = "$openMeteoUrl&current=apparent_temperature";
 
   try {
-    var response = await http.get(Uri.parse(url));
     var response1 = await http.get(Uri.parse(url1));
+    if (response1.statusCode != 200) throw Exception("Failed to fetch apparent temp");
+    
+    Map<String, dynamic> data1 = jsonDecode(response1.body);
+    int appTemperature = (data1["current"]["apparent_temperature"] as num).round();
+    String weatherCondition = await fetchWeatherCode(current: true);
 
-    if (response.statusCode == 200 && response1.statusCode == 200) {
-      String rawData = response.body;
-
-      Map<String, dynamic> data = jsonDecode(response1.body);
-      int appTemperature =
-          (data["current"]["apparent_temperature"] as num).round();
-
-      // fetch weather condition from open-meteo
-      String weatherCondition = await fetchWeatherCode(current: true);
-
-      // Split and process the response parts
-      if (rawData.split(';').length < 2) {
-        throw Exception("Invalid data structure from API.");
+    try {
+      var response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        String rawData = response.body;
+        if (rawData.split(';').length >= 2) {
+          List<dynamic> weatherData = jsonDecode(rawData.split(';')[1]);
+          if (weatherData.isNotEmpty && weatherData[0].length >= 11) {
+            return {
+              'date': weatherData[0][0],
+              'date_txt': DateFormat('yyyy-MM-dd HH:mm').format(
+                  DateTime.fromMillisecondsSinceEpoch(weatherData[0][0] * 1000)),
+              'temperature': ((weatherData[0][2] + weatherData[0][3]) / 2).round(),
+              'rainfall': weatherData[0][4],
+              'humidity': (weatherData[0][5] + weatherData[0][6]) / 2,
+              'windSpeed': weatherData[0][7],
+              'windDirection': weatherData[0][8],
+              'sunshine': weatherData[0][9],
+              'pressure': weatherData[0][10],
+              'appTemperature': appTemperature,
+              'weatherCondition': weatherCondition,
+            };
+          }
+        }
       }
+    } catch (e) {
+      print("IITK primary failed, falling back to OpenMeteo: $e");
+    }
 
-      // Decode the parts
-      List<dynamic> weatherData = jsonDecode(rawData.split(';')[1]);
-
-      if (weatherData.isEmpty || weatherData[0].length < 11) {
-        throw Exception("Missing or incomplete data from API.");
-      }
-
-      // Return map
+    // Fallback
+    String fallbackUrl = "$openMeteoUrl&current=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,wind_direction_10m,surface_pressure";
+    var fallbackResp = await http.get(Uri.parse(fallbackUrl));
+    if (fallbackResp.statusCode == 200) {
+      var data = jsonDecode(fallbackResp.body)["current"];
       return {
-        'date': weatherData[0][0],
-        'date_txt': DateFormat('yyyy-MM-dd HH:mm').format(
-            DateTime.fromMillisecondsSinceEpoch(weatherData[0][0] * 1000)),
-        'temperature': ((weatherData[0][2] + weatherData[0][3]) / 2).round(),
-        'rainfall': weatherData[0][4],
-        'humidity': (weatherData[0][5] + weatherData[0][6]) / 2,
-        'windSpeed': weatherData[0][7],
-        'windDirection': weatherData[0][8],
-        'sunshine': weatherData[0][9],
-        'pressure': weatherData[0][10],
+        'date': DateTime.parse(data['time']).millisecondsSinceEpoch ~/ 1000,
+        'date_txt': data['time'].replaceAll('T', ' '),
+        'temperature': (data['temperature_2m'] as num).round(),
+        'rainfall': data['precipitation'],
+        'humidity': data['relative_humidity_2m'],
+        'windSpeed': data['wind_speed_10m'],
+        'windDirection': data['wind_direction_10m'],
+        'sunshine': 0, // Fallback placeholder
+        'pressure': data['surface_pressure'],
         'appTemperature': appTemperature,
         'weatherCondition': weatherCondition,
       };
     } else {
-      throw Exception("Failed to fetch data: ${response.statusCode}");
+      throw Exception("Both IITK and OpenMeteo fallback failed.");
     }
   } catch (e) {
     print("Error in fetchCurrentData: $e");
@@ -250,77 +331,67 @@ Future<List<Map<String, dynamic>>> fetchHourlyForecastData() async {
 Future<List<Map<String, dynamic>>> fetchHourlyPastData() async {
   String todayDate = DateTime.now().toIso8601String().split('T')[0];
   String url = "$iitkUrl?select=4&start_date=$todayDate&end_date=$todayDate";
+  String urlOpenMeteo = "$openMeteoUrl&hourly=temperature_2m,precipitation&timezone=auto&start_date=$todayDate&end_date=$todayDate";
 
   try {
-    // Fetch IITK data (temperature)
-    var response = await http.get(Uri.parse(url));
-
-    // Fetch Open-Meteo hourly precipitation
-    String urlOpenMeteo =
-        "$openMeteoUrl&hourly=precipitation&timezone=auto&start_date=$todayDate&end_date=$todayDate";
     var responseOpenMeteo = await http.get(Uri.parse(urlOpenMeteo));
+    if (responseOpenMeteo.statusCode != 200) throw Exception("Failed OpenMeteo request");
+    var meteoData = jsonDecode(responseOpenMeteo.body);
+    
+    List<String> meteoTimes = (meteoData["hourly"]["time"] as List<dynamic>).cast<String>();
+    List<double> meteoPrecip = (meteoData["hourly"]["precipitation"] as List<dynamic>).map((e) => (e as num).toDouble()).toList();
+    List<double> meteoTemp = (meteoData["hourly"]["temperature_2m"] as List<dynamic>).map((e) => (e as num).toDouble()).toList();
 
-    if (response.statusCode == 200 && responseOpenMeteo.statusCode == 200) {
-      String rawData = response.body;
-
-      if (rawData.split(';').length < 2) {
-        throw Exception("Invalid data structure from IITK API.");
-      }
-
-      List<dynamic> weatherData = jsonDecode(rawData.split(';')[1]);
-      var meteoData = jsonDecode(responseOpenMeteo.body);
-
-      // Extract Open-Meteo time & precipitation
-      List<String> meteoTimes =
-          (meteoData["hourly"]["time"] as List<dynamic>).cast<String>();
-      List<double> meteoPrecip =
-          (meteoData["hourly"]["precipitation"] as List<dynamic>)
-              .map((e) => (e as num).toDouble())
-              .toList();
-
-      // Build a lookup map for Open-Meteo
-      Map<String, double> precipMap = {};
-      for (int i = 0; i < meteoTimes.length; i++) {
-        precipMap[meteoTimes[i].substring(0, 16)] = meteoPrecip[i];
-      }
-
-      List<Map<String, dynamic>> mergedData = [];
-      for (int i = 0; i < weatherData.length; i += 2) {
-        if (i + 1 >= weatherData.length) break;
-
-        double avgTempOdd = (weatherData[i][2] + weatherData[i][3]) / 2;
-        double avgTempEven =
-            (weatherData[i + 1][2] + weatherData[i + 1][3]) / 2;
-        double combinedAvgTemp = (avgTempOdd + avgTempEven) / 2;
-
-        String timestamp = DateTime.fromMillisecondsSinceEpoch(
-                (weatherData[i][0] as int) * 1000)
-            .toIso8601String()
-            .substring(0, 16);
-
-        double combinedPrecipitation = 0.0;
-        if (precipMap.containsKey(timestamp)) {
-          double val1 = precipMap[timestamp] ?? 0.0;
-          double val2 = precipMap[DateTime.parse(timestamp)
-                  .add(Duration(minutes: 30))
-                  .toIso8601String()
-                  .substring(0, 16)] ??
-              0.0;
-          combinedPrecipitation = val1 + val2;
-        }
-
-        mergedData.add({
-          "time": timestamp,
-          "temperature": (combinedAvgTemp * 10).roundToDouble() / 10,
-          "precipitation": (combinedPrecipitation * 10).roundToDouble() / 10,
-        });
-      }
-
-      return mergedData;
-    } else {
-      throw Exception(
-          "Failed to fetch data: ${response.statusCode}, ${responseOpenMeteo.statusCode}");
+    Map<String, double> precipMap = {};
+    Map<String, double> tempMap = {};
+    for (int i = 0; i < meteoTimes.length; i++) {
+      String t = meteoTimes[i].substring(0, 16);
+      precipMap[t] = meteoPrecip[i];
+      tempMap[t] = meteoTemp[i];
     }
+
+    try {
+      var response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        String rawData = response.body;
+        if (rawData.split(';').length >= 2) {
+          List<dynamic> weatherData = jsonDecode(rawData.split(';')[1]);
+          List<Map<String, dynamic>> mergedData = [];
+          for (int i = 0; i < weatherData.length; i += 2) {
+            if (i + 1 >= weatherData.length) break;
+            double avgTempOdd = (weatherData[i][2] + weatherData[i][3]) / 2;
+            double avgTempEven = (weatherData[i + 1][2] + weatherData[i + 1][3]) / 2;
+            double combinedAvgTemp = (avgTempOdd + avgTempEven) / 2;
+            String timestamp = DateTime.fromMillisecondsSinceEpoch((weatherData[i][0] as int) * 1000).toIso8601String().substring(0, 16);
+            double combinedPrecipitation = 0.0;
+            if (precipMap.containsKey(timestamp)) {
+              double val1 = precipMap[timestamp] ?? 0.0;
+              double val2 = precipMap[DateTime.parse(timestamp).add(Duration(minutes: 30)).toIso8601String().substring(0, 16)] ?? 0.0;
+              combinedPrecipitation = val1 + val2;
+            }
+            mergedData.add({
+              "time": timestamp,
+              "temperature": (combinedAvgTemp * 10).roundToDouble() / 10,
+              "precipitation": (combinedPrecipitation * 10).roundToDouble() / 10,
+            });
+          }
+          if (mergedData.isNotEmpty) return mergedData;
+        }
+      }
+    } catch (e) {
+      print("IITK fetchHourlyPastData failed, falling back to OpenMeteo temp: $e");
+    }
+
+    // Fallback: build mergedData entirely from tempMap & precipMap
+    List<Map<String, dynamic>> fallbackData = [];
+    for (int i = 0; i < meteoTimes.length; i++) {
+        fallbackData.add({
+            "time": meteoTimes[i].substring(0, 16),
+            "temperature": meteoTemp[i],
+            "precipitation": meteoPrecip[i],
+        });
+    }
+    return fallbackData;
   } catch (e) {
     print("Error fetching hourly past data: $e");
     return [];
@@ -344,58 +415,51 @@ Future<List<Map<String, dynamic>>> fetchPastData() async {
   // Helper function to process API data
   Future<Map<String, dynamic>> processApiData(String url, String date) async {
     try {
-      // IITK data (for temperature)
-      var response = await http.get(Uri.parse(url));
-
-      // Open-Meteo for precipitation
-      String urlOpenMeteo =
-          "$openMeteoUrl&daily=precipitation_sum&timezone=auto&start_date=$date&end_date=$date";
+      String urlOpenMeteo = "$openMeteoUrl&daily=precipitation_sum,temperature_2m_max,temperature_2m_min&timezone=auto&start_date=$date&end_date=$date";
       var responseOpenMeteo = await http.get(Uri.parse(urlOpenMeteo));
+      if (responseOpenMeteo.statusCode != 200) throw Exception("OpenMeteo failed for $date");
+      
+      var meteoData = jsonDecode(responseOpenMeteo.body);
+      double totalPrecip = (meteoData["daily"]["precipitation_sum"][0] as num).toDouble();
+      double meteoMaxTemp = (meteoData["daily"]["temperature_2m_max"][0] as num).toDouble();
+      double meteoMinTemp = (meteoData["daily"]["temperature_2m_min"][0] as num).toDouble();
 
-      if (response.statusCode == 200 && responseOpenMeteo.statusCode == 200) {
-        String rawData = response.body;
+      try {
+        var response = await http.get(Uri.parse(url));
+        if (response.statusCode == 200) {
+          String rawData = response.body;
+          if (rawData.split(';').length >= 2) {
+            List<dynamic> weatherData = jsonDecode(rawData.split(';')[1]);
+            if (weatherData.isNotEmpty) {
+              List<double> avgTemperatures = [];
+              for (var dataPoint in weatherData) {
+                double maxTemp = dataPoint[2].toDouble();
+                double minTemp = dataPoint[3].toDouble();
+                avgTemperatures.add((maxTemp + minTemp) / 2);
+              }
+              double maxTemperature = avgTemperatures.reduce((a, b) => a > b ? a : b);
+              double minTemperature = avgTemperatures.reduce((a, b) => a < b ? a : b);
 
-        if (rawData.split(';').length < 2) {
-          throw Exception("Invalid data structure from IITK API.");
+              return {
+                "date": date,
+                "min_temp": (minTemperature * 10).roundToDouble() / 10,
+                "max_temp": (maxTemperature * 10).roundToDouble() / 10,
+                "total_precip": (totalPrecip * 10).roundToDouble() / 10,
+              };
+            }
+          }
         }
-
-        List<dynamic> weatherData = jsonDecode(rawData.split(';')[1]);
-
-        // Compute average temperatures
-        List<double> avgTemperatures = [];
-        for (var dataPoint in weatherData) {
-          double maxTemp = dataPoint[2].toDouble();
-          double minTemp = dataPoint[3].toDouble();
-          avgTemperatures.add((maxTemp + minTemp) / 2);
-        }
-
-        // Calculate max & min temperatures
-        double maxTemperature = avgTemperatures.reduce((a, b) => a > b ? a : b);
-        double minTemperature = avgTemperatures.reduce((a, b) => a < b ? a : b);
-
-        // --- old precipitation ---
-        // List<double> precipitations = [];
-        // for (var dataPoint in weatherData) {
-        //   double precip = dataPoint[4].toDouble();
-        //   precipitations.add(precip);
-        // }
-        // double totalPrecipitation =
-        //     precipitations.reduce((a, b) => a + b);
-
-        var meteoData = jsonDecode(responseOpenMeteo.body);
-        double totalPrecipitation =
-            (meteoData["daily"]["precipitation_sum"][0] as num).toDouble();
-
-        return {
-          "date": date,
-          "min_temp": (minTemperature * 10).roundToDouble() / 10,
-          "max_temp": (maxTemperature * 10).roundToDouble() / 10,
-          "total_precip": (totalPrecipitation * 10).roundToDouble() / 10,
-        };
-      } else {
-        throw Exception(
-            "Failed to fetch data: ${response.statusCode}, ${responseOpenMeteo.statusCode}");
+      } catch (e) {
+        print("IITK failed for $date, using fallback: $e");
       }
+
+      // Fallback
+      return {
+        "date": date,
+        "min_temp": meteoMinTemp,
+        "max_temp": meteoMaxTemp,
+        "total_precip": totalPrecip,
+      };
     } catch (e) {
       print("Error processing data for $date: $e");
       return {};
@@ -417,34 +481,60 @@ Future<List<Map<String, dynamic>>> fetchPastData() async {
 }
 
 Future<Map<String, dynamic>> fetchSunPosition() async {
-  final url = "$openMeteoUrl&daily=sunrise,sunset&timezone=auto";
+  final url = "$openMeteoUrl&daily=sunrise,sunset&timezone=auto&past_days=1&forecast_days=2";
 
   final response = await http.get(Uri.parse(url));
 
   if (response.statusCode == 200) {
     final data = jsonDecode(response.body);
 
-    final sunriseStr = data["daily"]["sunrise"][0];
-    final sunsetStr = data["daily"]["sunset"][0];
+    final yesterdaySunsetStr = data["daily"]["sunset"][0];
+    final todaySunriseStr = data["daily"]["sunrise"][1];
+    final todaySunsetStr = data["daily"]["sunset"][1];
+    final tomorrowSunriseStr = data["daily"]["sunrise"][2];
 
-    final sunrise = DateTime.parse(sunriseStr);
-    final sunset = DateTime.parse(sunsetStr);
+    final yesterdaySunset = DateTime.parse(yesterdaySunsetStr);
+    final todaySunrise = DateTime.parse(todaySunriseStr);
+    final todaySunset = DateTime.parse(todaySunsetStr);
+    final tomorrowSunrise = DateTime.parse(tomorrowSunriseStr);
     final now = DateTime.now();
 
     double progress = 0;
-    if (now.isAfter(sunrise) && now.isBefore(sunset)) {
-      final totalDay = sunset.difference(sunrise).inSeconds;
-      final elapsed = now.difference(sunrise).inSeconds;
+    bool isNight = false;
+    DateTime startEvent = todaySunrise;
+    DateTime endEvent = todaySunset;
+
+    if (now.isBefore(todaySunrise)) {
+      // It's night, before today's sunrise
+      final totalNight = todaySunrise.difference(yesterdaySunset).inSeconds;
+      final elapsed = now.difference(yesterdaySunset).inSeconds;
+      progress = elapsed / totalNight;
+      isNight = true;
+      startEvent = yesterdaySunset;
+      endEvent = todaySunrise;
+    } else if (now.isBefore(todaySunset)) {
+      // It's day
+      final totalDay = todaySunset.difference(todaySunrise).inSeconds;
+      final elapsed = now.difference(todaySunrise).inSeconds;
       progress = elapsed / totalDay;
-    } else if (now.isAfter(sunset)) {
-      progress = 1.0;
+      isNight = false;
+      startEvent = todaySunrise;
+      endEvent = todaySunset;
+    } else {
+      // It's night, after today's sunset
+      final totalNight = tomorrowSunrise.difference(todaySunset).inSeconds;
+      final elapsed = now.difference(todaySunset).inSeconds;
+      progress = elapsed / totalNight;
+      isNight = true;
+      startEvent = todaySunset;
+      endEvent = tomorrowSunrise;
     }
 
     return {
-      "sunrise": sunrise,
-      "sunset": sunset,
+      "startEvent": startEvent.toIso8601String(),
+      "endEvent": endEvent.toIso8601String(),
       "progress": progress.clamp(0.0, 1.0),
-      // "progress": 0.3,
+      "isNight": isNight,
     };
   } else {
     throw Exception("Failed to fetch sun data");

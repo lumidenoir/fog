@@ -26,6 +26,6 @@ Future readJsonFile(String fileName) async {
     return jsonDecode(jsonContent);
   } catch (e) {
     print("Error reading $fileName: $e");
-    return {};
+    return [];
   }
 }

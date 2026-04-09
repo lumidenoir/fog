@@ -1,25 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 class SunCard extends StatefulWidget {
-  final DateTime sunrise;
-  final DateTime sunset;
+  final DateTime startEvent;
+  final DateTime endEvent;
   final double progress; // 0.0 - 1.0
+  final bool isNight;
 
   const SunCard({
     Key? key,
-    required this.sunrise,
-    required this.sunset,
+    required this.startEvent,
+    required this.endEvent,
     required this.progress,
+    required this.isNight,
   }) : super(key: key);
 
   @override
   State<SunCard> createState() => _SunCardState();
 }
 
-class _SunCardState extends State<SunCard> with SingleTickerProviderStateMixin {
+class _SunCardState extends State<SunCard>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
 
@@ -39,6 +41,16 @@ class _SunCardState extends State<SunCard> with SingleTickerProviderStateMixin {
   }
 
   @override
+  void didUpdateWidget(SunCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.progress != widget.progress || oldWidget.isNight != widget.isNight) {
+      _animation = Tween<double>(begin: _animation.value, end: widget.progress.clamp(0, 1))
+          .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -49,21 +61,22 @@ class _SunCardState extends State<SunCard> with SingleTickerProviderStateMixin {
     final timeFormat = DateFormat.Hm();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       child: Column(
         children: [
           SizedBox(
-            height: 140,
+            height: 80,
             child: AnimatedBuilder(
               animation: _animation,
               builder: (context, child) {
                 return CustomPaint(
-                  painter: SunArcPainter(
+                  painter: LinearSunPainter(
                     _animation.value,
-                    sunrise: timeFormat.format(widget.sunrise),
-                    sunset: timeFormat.format(widget.sunset),
+                    startText: timeFormat.format(widget.startEvent),
+                    endText: timeFormat.format(widget.endEvent),
+                    isNight: widget.isNight,
                   ),
-                  size: const Size(double.infinity, 140),
+                  size: const Size(double.infinity, 80),
                 );
               },
             ),
@@ -74,106 +87,95 @@ class _SunCardState extends State<SunCard> with SingleTickerProviderStateMixin {
   }
 }
 
-class SunArcPainter extends CustomPainter {
+class LinearSunPainter extends CustomPainter {
   final double progress;
-  final String sunrise;
-  final String sunset;
+  final String startText;
+  final String endText;
+  final bool isNight;
 
-  SunArcPainter(this.progress, {required this.sunrise, required this.sunset});
+  LinearSunPainter(this.progress,
+      {required this.startText,
+      required this.endText,
+      required this.isNight});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final Paint trackPaint = Paint()
+    final trackPaint = Paint()
       ..color = Colors.grey.shade800
       ..strokeWidth = 6
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round; // rounded edges
+      ..strokeCap = StrokeCap.round;
 
-    final Paint progressPaint = Paint()
-      ..color = Colors.orangeAccent
+    final progressPaint = Paint()
+      ..color = isNight ? Colors.indigoAccent : Colors.orangeAccent
       ..strokeWidth = 6
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round; // rounded edges
+      ..strokeCap = StrokeCap.round;
 
-    final double radius = size.width / 2 - 16;
-    final Offset center = Offset(size.width / 2, size.height);
+    final double lineY = size.height / 2;
+    const double padding = 20.0;
+    final double startX = padding;
+    final double endX = size.width - padding;
+    final double lineLength = endX - startX;
 
-    const double startAngle = math.pi;
-    const double sweepAngle = math.pi;
+    // Background line
+    canvas.drawLine(Offset(startX, lineY), Offset(endX, lineY), trackPaint);
 
-    // background arc
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      startAngle,
-      sweepAngle,
-      false,
-      trackPaint,
-    );
+    // Progress line
+    final double currentX = startX + (lineLength * progress);
+    canvas.drawLine(
+        Offset(startX, lineY), Offset(currentX, lineY), progressPaint);
 
-    // progress arc
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      startAngle,
-      sweepAngle * progress,
-      false,
-      progressPaint,
-    );
+    // Current icon position
+    final Offset iconPos = Offset(currentX, lineY);
 
-    // sun position
-    final double sunAngle = startAngle + sweepAngle * progress;
-    final Offset sunPos = Offset(
-      center.dx + radius * math.cos(sunAngle),
-      center.dy + radius * math.sin(sunAngle),
-    );
-
+    // Glow
     canvas.drawCircle(
-      sunPos,
-      10,
+      iconPos,
+      12,
       Paint()
-        ..color = Colors.orangeAccent
+        ..color = isNight ? Colors.indigoAccent : Colors.orangeAccent
         ..style = PaintingStyle.fill
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
     );
 
-    // sun icon
-    final textPainter = TextPainter(
-      text: const TextSpan(
-        text: '☀',
-        style: TextStyle(fontSize: 14, color: Colors.white),
+    // Draw the icon text '☀' or '🌙'
+    final TextPainter iconPainter = TextPainter(
+      text: TextSpan(
+        text: isNight ? '🌙' : '☀',
+        style: const TextStyle(fontSize: 16, color: Colors.white),
       ),
       textDirection: ui.TextDirection.ltr,
     );
-    textPainter.layout();
-    textPainter.paint(
-        canvas, sunPos - Offset(textPainter.width / 2, textPainter.height / 2));
+    iconPainter.layout();
+    iconPainter.paint(
+        canvas,
+        iconPos -
+            Offset(iconPainter.width / 2, iconPainter.height / 2));
 
-    // --- sunrise text (below left end) ---
-    final sunrisePainter = TextPainter(
+    // Draw left text (start time)
+    final TextPainter startTextPainter = TextPainter(
       text: TextSpan(
-        text: sunrise,
+        text: startText,
         style: const TextStyle(fontSize: 14, color: Colors.white70),
       ),
       textDirection: ui.TextDirection.ltr,
     );
-    sunrisePainter.layout();
-    sunrisePainter.paint(
-      canvas,
-      Offset(center.dx - radius - sunrisePainter.width / 2, center.dy + 8),
-    );
+    startTextPainter.layout();
+    startTextPainter.paint(
+        canvas, Offset(startX - (startTextPainter.width / 2), lineY + 16));
 
-    // --- sunset text (below right end) ---
-    final sunsetPainter = TextPainter(
+    // Draw right text (end time)
+    final TextPainter endTextPainter = TextPainter(
       text: TextSpan(
-        text: sunset,
+        text: endText,
         style: const TextStyle(fontSize: 14, color: Colors.white70),
       ),
       textDirection: ui.TextDirection.ltr,
     );
-    sunsetPainter.layout();
-    sunsetPainter.paint(
-      canvas,
-      Offset(center.dx + radius - sunsetPainter.width / 2, center.dy + 8),
-    );
+    endTextPainter.layout();
+    endTextPainter.paint(
+        canvas, Offset(endX - (endTextPainter.width / 2), lineY + 16));
   }
 
   @override

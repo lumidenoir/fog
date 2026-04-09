@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'services/write_files.dart';
 import 'screens/weather_screen.dart';
 
 void main() async {
@@ -53,49 +52,38 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class SplashScreen extends StatelessWidget {
+class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
 
-  Future<void> _initializeApp() async {
-    try {
-      await createHourlyJson();
-      await createDailyJson();
-      print("JSON files initialized successfully.");
-    } catch (e) {
-      print("Error during initialization: $e");
-      throw Exception("Initialization failed");
-    }
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const WeatherScreen()),
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<void>(
-      future: _initializeApp(),
-      builder: (BuildContext context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        } else if (snapshot.hasError) {
-          return Scaffold(
-            body: Center(
-              child: Text(
-                'Initialization Failed: ${snapshot.error}',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.bebasNeue(fontSize: 16, color: Colors.red),
-              ),
-            ),
-          );
-        } else {
-          Future.microtask(() {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const WeatherScreen()),
-            );
-          });
-          return const SizedBox.shrink();
-        }
-      },
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('FOG',
+                style: GoogleFonts.bebasNeue(
+                    fontSize: 80, color: Colors.white, letterSpacing: 8)),
+          ],
+        ),
+      ),
     );
   }
 }
